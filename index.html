@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mijn Buurt Haltes</title>
+    <style>
+        :root {
+            --primary: #007bff;
+            --success: #28a745;
+            --danger: #dc3545;
+            --bg: #f8f9fa;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+        }
+        .selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            overflow-x: auto;
+            padding-bottom: 5px;
+        }
+        button {
+            background: white;
+            border: 1px solid #ccc;
+            padding: 10px 15px;
+            border-radius: 20px;
+            cursor: pointer;
+            white-space: nowrap;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        button.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        .card {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .bus-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .bus-row:last-child {
+            border-bottom: none;
+        }
+        .bus-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .line-number {
+            background: #333;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            min-width: 30px;
+            text-align: center;
+        }
+        .destination {
+            font-weight: 500;
+        }
+        .time-info {
+            text-align: right;
+        }
+        .time {
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        .delay {
+            font-size: 0.8rem;
+            color: var(--danger);
+            font-weight: bold;
+        }
+        .no-delay {
+            font-size: 0.8rem;
+            color: var(--success);
+        }
+        .loading {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🚌 Live Vertrektijden Buurt</h1>
+    
+    <!-- Hier komen de knoppen voor de haltes dynamically -->
+    <div id="halte-knoppen" class="selector"></div>
+
+    <!-- Hier komen de vertrektijden -->
+    <div class="card">
+        <div id="tijden-lijst">Selecteer een halte...</div>
+    </div>
+</div>
+
+<script>
+    let haltesData = [];
+
+    // 1. Laad de haltes uit de JSON file
+    async function laadHaltes() {
+        try {
+            const response = await fetch('haltes.json');
+            haltesData = await response.json();
+            
+            const knoppenContainer = document.getElementById('halte-knoppen');
+            knoppenContainer.innerHTML = '';
+
+            haltesData.forEach((halte, index) => {
+                const btn = document.createElement('button');
+                btn.innerText = halte.naam;
+                btn.onclick = () => activeerHalte(index, btn);
+                knoppenContainer.appendChild(btn);
+            });
+
+            // Activeer automatisch de eerste halte bij het opstarten
+            if(haltesData.length > 0) {
+                knoppenContainer.children[0].click();
+            }
+        } catch (error) {
+            document.getElementById('tijden-lijst').innerText = 'Fout bij het laden van haltes.json';
+            console.error(error);
+        }
+    }
+
+    // 2. Wissel van actieve halte en haal data op
+    function activeerHalte(index, geselecteerdeKnop) {
+        // Reset knoppen styling
+        document.querySelectorAll('.selector button').forEach(b => b.classList.remove('active'));
+        geselecteerdeKnop.classList.add('active');
+
+        const halte = haltesData[index];
+        haalTijdenOp(halte.code);
+    }
+
+    // 3. Haal live data op van de OpenOV API
+    async function haalTijdenOp(tpcCode) {
+        const lijst = document.getElementById('tijden-lijst');
+        lijst.innerHTML = '<div class="loading">Tijden ophalen...</div>';
+
+        try {
+            // We gebruiken de betrouwbare openbare ovapi.nl endpoint voor een specifieke halte (TPC)
+            const response = await fetch(`https://ovapi.nl{tpcCode}`);
+            const data = await response.json();
+
+            // De API geeft data terug onder de TPC-code sleutel
+            const halteData = data[tpcCode];
+            
+            if (!halteData || !halteData.passes || Object.keys(halteData.passes).length === 0) {
+                lijst.innerHTML = '<div>Geen bussen gepland voor de komende uren.</div>';
+                return;
+            }
+
+            // Sorteer de ritten op basis van geplande vertrektijd
+            const ritten = Object.values(halteData.passes).sort((a, b) => 
+                new Date(a.ExpectedDepartureTime) - new Date(b.ExpectedDepartureTime)
+            );
+
+            lijst.innerHTML = ''; // Maak leeg voor nieuwe data
+
+            // Toon de eerste 7 bussen
+            ritten.slice(0, 7).forEach(rit => {
+                const gepland = new Date(rit.TargetDepartureTime);
+                const actueel = new Date(rit.ExpectedDepartureTime);
+                
+                // Bereken vertraging in minuten
+                const vertragingMs = actueel - gepland;
+                const vertragingMinuten = Math.round(vertragingMs / 60000);
+
+                // Formateer tijd naar HH:MM
+                const tijdWeergave = gepland.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+
+                // Maak de HTML rij aan
+                const rij = document.createElement('div');
+                rij.className = 'bus-row';
+                
+                let vertragingHTML = '<span class="no-delay">Op tijd</span>';
+                if (vertragingMinuten > 0) {
+                    vertragingHTML = `<span class="delay">+${vertragingMinuten} min</span>`;
+                }
+
+                rij.innerHTML = `
+                    <div class="bus-info">
+                        <span class="line-number">${rit.LinePublicNumber}</span>
+                        <span class="destination">${rit.DestinationName50}</span>
+                    </div>
+                    <div class="time-info">
+                        <div class="time">${tijdWeergave}</div>
+                        <div>${vertragingHTML}</div>
+                    </div>
+                `;
+                lijst.appendChild(rij);
+            });
+
+        } catch (error) {
+            lijst.innerHTML = '<div>Kon live data niet ophalen. Controleer de haltecode of internetverbinding.</div>';
+            console.error(error);
+        }
+    }
+
+    // Start de app zodra de pagina geladen is
+    window.onload = laadHaltes;
+</script>
+
+</body>
+</html>
