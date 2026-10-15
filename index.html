@@ -165,7 +165,7 @@
 
         try {
             // We gebruiken de betrouwbare openbare ovapi.nl endpoint voor een specifieke halte (TPC)
-            const response = await fetch(`https://v0.ovapi.nl/tpc/${tpcCode}`);
+            const response = await fetch('https://v0.ovapi.nl/tpc/${tpcCode}');
             const data = await response.json();
 
             // De API geeft data terug onder de TPC-code sleutel
